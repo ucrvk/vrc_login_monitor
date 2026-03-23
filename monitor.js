@@ -16,7 +16,7 @@ if (typeof Promise.withResolvers !== "function") {
 
 const { VRChat } = require("vrchat");
 
-const CONFIG_PATH = path.resolve(__dirname, "config", "config.json");
+const CONFIG_PATH = path.resolve(__dirname, "config.json");
 const LOGIN_PORT = 3688;
 const APP_INFO = {
   name: "login-monitor",
@@ -82,8 +82,20 @@ function loadConfig() {
   return config;
 }
 
-function saveConfig(config) {
-  fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+function getTokenFromEnv() {
+  const candidates = [
+    process.env.VRC_TOKEN,
+    process.env.VRCHAT_TOKEN,
+    process.env.TOKEN
+  ];
+
+  for (const token of candidates) {
+    if (isNonEmptyString(token)) {
+      return token.trim();
+    }
+  }
+
+  return "";
 }
 
 function containsValueDeep(target, expected) {
@@ -388,19 +400,18 @@ function startWebLoginAndGetToken(vrchat, port = LOGIN_PORT) {
 }
 
 async function ensureToken(vrchat, config) {
+  const envToken = getTokenFromEnv();
+  const fromEnv = await verifyTokenWithSdk(vrchat, envToken);
+  if (fromEnv) {
+    return fromEnv;
+  }
+
   const fromConfig = await verifyTokenWithSdk(vrchat, config.token);
   if (fromConfig) {
-    if (fromConfig !== config.token) {
-      config.token = fromConfig;
-      saveConfig(config);
-    }
     return fromConfig;
   }
 
   const freshToken = await startWebLoginAndGetToken(vrchat, LOGIN_PORT);
-  config.token = freshToken;
-  saveConfig(config);
-  console.log("token 已写入 config.json");
   return freshToken;
 }
 
