@@ -16,7 +16,7 @@ if (typeof Promise.withResolvers !== "function") {
 
 const { VRChat } = require("vrchat");
 
-const CONFIG_PATH = path.resolve(__dirname, "config.json");
+const CONFIG_PATH = path.resolve(__dirname, "config", "config.json");
 const LOGIN_PORT = 3688;
 const APP_INFO = {
   name: "login-monitor",
