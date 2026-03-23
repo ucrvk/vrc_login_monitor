@@ -11,9 +11,48 @@ const APP_INFO = {
   contact: "https://vrchat.community/javascript"
 };
 
+function isPlainEmptyObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
+}
+
+function parseConfigFromEnv() {
+  const encoded = process.env.CONFIG;
+  if (!isNonEmptyString(encoded)) {
+    throw new Error("config.json 不可用，且环境变量 CONFIG 不存在");
+  }
+
+  let decoded = "";
+  try {
+    decoded = Buffer.from(encoded, "base64").toString("utf8");
+  } catch (_error) {
+    throw new Error("环境变量 CONFIG 不是有效的 base64");
+  }
+
+  if (!isNonEmptyString(decoded)) {
+    throw new Error("环境变量 CONFIG 解码后为空");
+  }
+
+  try {
+    return JSON.parse(decoded);
+  } catch (_error) {
+    throw new Error("环境变量 CONFIG 解码后不是有效 JSON");
+  }
+}
+
 function loadConfig() {
-  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
-  const config = JSON.parse(raw);
+  let config = null;
+
+  if (fs.existsSync(CONFIG_PATH)) {
+    const raw = fs.readFileSync(CONFIG_PATH, "utf8");
+    if (isNonEmptyString(raw)) {
+      config = JSON.parse(raw);
+    }
+  }
+
+  if (!config || isPlainEmptyObject(config)) {
+    config = parseConfigFromEnv();
+  }
+
   if (!Array.isArray(config.subscriptions)) {
     throw new Error("config.json 中 subscriptions 必须是数组");
   }
