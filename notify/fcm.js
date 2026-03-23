@@ -69,7 +69,7 @@ async function sendFcm(payload, options = {}) {
 
   const accessToken = await getAccessToken(serviceAccount);
   const title = options.title || `VRChat ${payload.type}`;
-  const body = options.body || JSON.stringify(payload.content);
+  const body = options.body || payload.message || payload.type;
 
   const endpoint = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
   const requestBody = {

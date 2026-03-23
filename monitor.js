@@ -111,11 +111,83 @@ function matchesSubscription(content, subscription) {
 }
 
 function createEventPayload(eventType, content) {
+  const message = buildEventMessage(eventType, content);
+  if (!isNonEmptyString(message)) {
+    return null;
+  }
+
   return {
     type: eventType,
+    message,
     content,
     timestamp: Date.now()
   };
+}
+
+function readEventUser(content) {
+  const user = content && typeof content === "object" ? content.user : null;
+  const userId = isNonEmptyString(content?.userId) ? content.userId.trim() : "";
+
+  return {
+    id: isNonEmptyString(user?.id) ? user.id.trim() : userId,
+    username: isNonEmptyString(user?.username) ? user.username.trim() : "",
+    displayName: isNonEmptyString(user?.displayName) ? user.displayName.trim() : ""
+  };
+}
+
+function getUserLabel(content) {
+  const eventUser = readEventUser(content);
+
+  if (isNonEmptyString(eventUser.username)) {
+    return eventUser.username;
+  }
+
+  if (isNonEmptyString(eventUser.displayName)) {
+    return eventUser.displayName;
+  }
+
+  return "好友";
+}
+
+function normalizeLocationTarget(content) {
+  const location = isNonEmptyString(content?.location) ? content.location.trim() : "";
+  const travelingToLocation = isNonEmptyString(content?.travelingToLocation)
+    ? content.travelingToLocation.trim()
+    : "";
+
+  if (location === "traveling" && travelingToLocation) {
+    return travelingToLocation;
+  }
+
+  return location;
+}
+
+function buildEventMessage(eventType, content) {
+  const userLabel = getUserLabel(content);
+
+  if (eventType === "friend-online") {
+    return `${userLabel}上线了`;
+  }
+
+  if (eventType === "friend-offline") {
+    return `${userLabel}下线了`;
+  }
+
+  if (eventType === "friend-location") {
+    const target = normalizeLocationTarget(content);
+    const isPrivate =
+      (isNonEmptyString(content?.worldId) && content.worldId.trim() === "private") ||
+      target === "private";
+
+    if (isPrivate) {
+      return "";
+    }
+
+    const destination = target || "未知房间";
+    return `${userLabel}更换房间到了${destination}`;
+  }
+
+  return `${eventType}`;
 }
 
 function loadNotifyHandlers(notifyConfig = []) {
@@ -151,7 +223,7 @@ function loadNotifyHandlers(notifyConfig = []) {
       method: "consoleLog",
       options: {},
       send: async (payload) => {
-        console.log(`[${payload.type}]`, JSON.stringify(payload.content));
+        console.log(`[${payload.type}]`, payload.message || payload.type);
       }
     });
   }
@@ -355,6 +427,10 @@ function attachSubscriptions(vrchat, subscriptions, notifyHandlers) {
       }
 
       const payload = createEventPayload(eventType, content);
+      if (!payload) {
+        return;
+      }
+
       await dispatchNotify(notifyHandlers, payload);
     });
   }

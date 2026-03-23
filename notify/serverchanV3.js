@@ -23,9 +23,7 @@ async function sendServerChanV3(payload, options = {}) {
     `event: ${payload.type}`,
     `time: ${new Date(payload.timestamp).toISOString()}`,
     "",
-    "```json",
-    JSON.stringify(payload.content, null, 2),
-    "```"
+    payload.message || payload.type
   ].join("\n");
 
   const params = new URLSearchParams({ title, desp });
