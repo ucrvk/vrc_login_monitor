@@ -1,10 +1,23 @@
 ﻿const fs = require("fs");
+const http = require("http");
 const path = require("path");
-const readline = require("readline/promises");
-const { stdin, stdout } = require("process");
+
+if (typeof Promise.withResolvers !== "function") {
+  Promise.withResolvers = function withResolvers() {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+}
+
 const { VRChat } = require("vrchat");
 
 const CONFIG_PATH = path.resolve(__dirname, "config.json");
+const LOGIN_PORT = 3688;
 const APP_INFO = {
   name: "login-monitor",
   version: "1.0.0",
@@ -15,19 +28,26 @@ function isPlainEmptyObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
 }
 
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function escapeHtml(input) {
+  return String(input)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function parseConfigFromEnv() {
   const encoded = process.env.CONFIG;
   if (!isNonEmptyString(encoded)) {
     throw new Error("config.json 不可用，且环境变量 CONFIG 不存在");
   }
 
-  let decoded = "";
-  try {
-    decoded = Buffer.from(encoded, "base64").toString("utf8");
-  } catch (_error) {
-    throw new Error("环境变量 CONFIG 不是有效的 base64");
-  }
-
+  const decoded = Buffer.from(encoded, "base64").toString("utf8");
   if (!isNonEmptyString(decoded)) {
     throw new Error("环境变量 CONFIG 解码后为空");
   }
@@ -64,10 +84,6 @@ function loadConfig() {
 
 function saveConfig(config) {
   fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-}
-
-function isNonEmptyString(value) {
-  return typeof value === "string" && value.trim().length > 0;
 }
 
 function containsValueDeep(target, expected) {
@@ -172,39 +188,131 @@ async function verifyTokenWithSdk(vrchat, token) {
   return null;
 }
 
-async function promptLoginAndGetToken(vrchat) {
-  const rl = readline.createInterface({ input: stdin, output: stdout });
+function renderLoginPage(message = "", token = "", error = "") {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VRChat 登录</title>
+  <style>
+    body { font-family: sans-serif; margin: 24px; max-width: 560px; }
+    input, button { width: 100%; padding: 8px; margin: 6px 0; box-sizing: border-box; }
+    .msg { color: #0a7a2f; margin: 8px 0; }
+    .err { color: #b00020; margin: 8px 0; }
+    .token { word-break: break-all; background: #f4f4f4; padding: 8px; }
+  </style>
+</head>
+<body>
+  <h2>VRChat 登录</h2>
+  ${message ? `<div class="msg">${escapeHtml(message)}</div>` : ""}
+  ${error ? `<div class="err">${escapeHtml(error)}</div>` : ""}
+  ${token ? `<div>token:</div><div class="token">${escapeHtml(token)}</div>` : ""}
+  <form method="post" action="/login">
+    <label>用户名/邮箱</label>
+    <input name="username" required />
+    <label>密码</label>
+    <input name="password" type="password" required />
+    <label>OTP (可选)</label>
+    <input name="otp" />
+    <button type="submit">登录</button>
+  </form>
+</body>
+</html>`;
+}
 
-  try {
-    const username = (await rl.question("VRChat 用户名/邮箱: ")).trim();
-    const password = (await rl.question("VRChat 密码: ")).trim();
+function readRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = "";
 
-    let cachedOtp = "";
-    const twoFactorCode = async () => {
-      if (!cachedOtp) {
-        cachedOtp = (await rl.question("OTP (如需 2FA): ")).trim();
+    req.on("data", (chunk) => {
+      data += chunk;
+      if (data.length > 1024 * 1024) {
+        reject(new Error("request body too large"));
+        req.destroy();
       }
-      return cachedOtp;
-    };
-
-    await vrchat.login({
-      username,
-      password,
-      twoFactorCode,
-      throwOnError: true
     });
 
-    const verified = await vrchat.verifyAuthToken({ throwOnError: true });
-    const token = verified?.data?.token;
+    req.on("end", () => resolve(data));
+    req.on("error", reject);
+  });
+}
 
-    if (!isNonEmptyString(token)) {
-      throw new Error("登录成功，但未拿到可用 token");
-    }
+function startWebLoginAndGetToken(vrchat, port = LOGIN_PORT) {
+  return new Promise((resolve, reject) => {
+    let finished = false;
 
-    return token;
-  } finally {
-    rl.close();
-  }
+    const complete = (fn) => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      fn();
+    };
+
+    const server = http.createServer(async (req, res) => {
+      const url = new URL(req.url || "/", `http://127.0.0.1:${port}`);
+
+      if (req.method === "GET" && url.pathname === "/") {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(renderLoginPage("请登录 VRChat 账号"));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/login") {
+        try {
+          const rawBody = await readRequestBody(req);
+          const form = new URLSearchParams(rawBody);
+
+          const username = (form.get("username") || "").trim();
+          const password = (form.get("password") || "").trim();
+          const otp = (form.get("otp") || "").trim();
+
+          if (!username || !password) {
+            throw new Error("用户名和密码不能为空");
+          }
+
+          await vrchat.login({
+            username,
+            password,
+            twoFactorCode: async () => otp,
+            throwOnError: true
+          });
+
+          const verified = await vrchat.verifyAuthToken({ throwOnError: true });
+          const token = verified?.data?.token;
+          if (!isNonEmptyString(token)) {
+            throw new Error("登录成功，但未拿到可用 token");
+          }
+
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(renderLoginPage("登录成功，服务即将关闭", token));
+
+          res.on("finish", () => {
+            server.close(() => {
+              complete(() => resolve(token));
+            });
+          });
+          return;
+        } catch (error) {
+          res.writeHead(401, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(renderLoginPage("", "", error?.message || String(error)));
+          return;
+        }
+      }
+
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Not Found");
+    });
+
+    server.on("error", (error) => {
+      complete(() => reject(error));
+    });
+
+    server.listen(port, "0.0.0.0", () => {
+      console.log(`token 为空或失效，请访问 http://127.0.0.1:${port} 登录`);
+    });
+  });
 }
 
 async function ensureToken(vrchat, config) {
@@ -217,8 +325,7 @@ async function ensureToken(vrchat, config) {
     return fromConfig;
   }
 
-  console.log("token 为空或失效，请在控制台登录...");
-  const freshToken = await promptLoginAndGetToken(vrchat);
+  const freshToken = await startWebLoginAndGetToken(vrchat, LOGIN_PORT);
   config.token = freshToken;
   saveConfig(config);
   console.log("token 已写入 config.json");
