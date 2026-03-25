@@ -122,6 +122,20 @@ function matchesSubscription(content, subscription) {
   return containsValueDeep(content, subscription.dest);
 }
 
+async function createEventPayloadAsync(vrchat, eventType, content) {
+  const message = await buildEventMessageAsync(vrchat, eventType, content);
+  if (!isNonEmptyString(message)) {
+    return null;
+  }
+
+  return {
+    type: eventType,
+    message,
+    content,
+    timestamp: Date.now()
+  };
+}
+
 function createEventPayload(eventType, content) {
   const message = buildEventMessage(eventType, content);
   if (!isNonEmptyString(message)) {
@@ -174,7 +188,15 @@ function normalizeLocationTarget(content) {
   return location;
 }
 
-function buildEventMessage(eventType, content) {
+function getWorldNameFromContent(content) {
+  // 直接从 WS 消息的 content.world.name 获取房间名称
+  if (content?.world?.name) {
+    return content.world.name;
+  }
+  return null;
+}
+
+async function buildEventMessageAsync(vrchat, eventType, content) {
   const userLabel = getUserLabel(content);
 
   if (eventType === "friend-online") {
@@ -186,7 +208,17 @@ function buildEventMessage(eventType, content) {
   }
 
   if (eventType === "friend-location") {
-    const target = normalizeLocationTarget(content);
+    const location = isNonEmptyString(content?.location) ? content.location.trim() : "";
+    const travelingToLocation = isNonEmptyString(content?.travelingToLocation)
+      ? content.travelingToLocation.trim()
+      : "";
+
+    // 如果 location 是 traveling，不发消息
+    if (location === "traveling") {
+      return "";
+    }
+
+    const target = travelingToLocation || location;
     const isPrivate =
       (isNonEmptyString(content?.worldId) && content.worldId.trim() === "private") ||
       target === "private";
@@ -195,11 +227,20 @@ function buildEventMessage(eventType, content) {
       return "";
     }
 
-    const destination = target || "未知房间";
+    // 优先从 WS 消息中直接获取房间名称
+    let destination = getWorldNameFromContent(content);
+    if (!destination) {
+      destination = target || "未知房间";
+    }
+
     return `${userLabel}更换房间到了${destination}`;
   }
 
   return `${eventType}`;
+}
+
+function buildEventMessage(eventType, content) {
+  return buildEventMessageAsync(null, eventType, content);
 }
 
 function loadNotifyHandlers(notifyConfig = []) {
@@ -437,7 +478,7 @@ function attachSubscriptions(vrchat, subscriptions, notifyHandlers) {
         return;
       }
 
-      const payload = createEventPayload(eventType, content);
+      const payload = await createEventPayloadAsync(vrchat, eventType, content);
       if (!payload) {
         return;
       }
