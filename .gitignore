@@ -1,2 +1,7 @@
 config.json
 node_modules
+.codex
+.qwen
+data
+web/node_modules
+web/dist

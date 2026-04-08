@@ -1,19 +1,23 @@
 {
-    "name": "login_monitor",
-    "version": "1.0.0",
-    "description": "",
-    "main": "monitor.js",
-    "scripts": {
-        "start": "node monitor.js",
-        "test": "echo \"Error: no test specified\" && exit 1"
-    },
-    "keywords": [],
-    "author": "",
-    "license": "ISC",
-    "type": "commonjs",
-    "dependencies": {
-        "google-auth-library": "^10.6.2",
-        "vrchat": "^2.21.7",
-        "ws": "^8.20.0"
-    }
+  "name": "login_monitor",
+  "version": "1.0.0",
+  "description": "",
+  "main": "monitor.js",
+  "scripts": {
+    "start": "node monitor.js",
+    "web:dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
+    "build": "npm run web:build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "google-auth-library": "^10.6.2",
+    "opencode-ai": "^1.4.0",
+    "vrchat": "^2.21.7",
+    "ws": "^8.20.0"
+  }
 }
