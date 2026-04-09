@@ -455,7 +455,7 @@ function openLoginDialog() {
 async function submitLoginPassword() {
   loginDialog.loading = true;
   try {
-    const res = await apiFetch(`/auth/vrc/login/start`, {
+    const res = await apiFetch(`/api/auth/vrc/login/start`, {
       method: "POST",
       body: {
         username: loginDialog.username,
@@ -494,7 +494,7 @@ async function submitLoginPassword() {
 async function submitLoginFactor() {
   loginDialog.loading = true;
   try {
-    const res = await apiFetch(`/auth/vrc/login/verify`, {
+    const res = await apiFetch(`/api/auth/vrc/login/verify`, {
       method: "POST",
       body: {
         flowId: loginDialog.flowId,

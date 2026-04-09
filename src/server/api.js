@@ -52,6 +52,7 @@ function createApiHandler({ authService, repositories, vrchatService }) {
     const method = (req.method || "GET").toUpperCase();
     const pathname = url.pathname;
     const authState = authService.getAuthState(req);
+    const matchesAnyPath = (...candidates) => candidates.includes(pathname);
 
     const requireAnyAuth = () => {
       if (authState.authenticated) {
@@ -83,7 +84,7 @@ function createApiHandler({ authService, repositories, vrchatService }) {
       return authState.user.authenticated && Number(authState.user.loginUserId) === Number(loginUserId);
     };
 
-    if (method === "POST" && pathname === "/admin/login") {
+    if (method === "POST" && matchesAnyPath("/api/admin/login", "/admin/login")) {
       const body = await parseJsonBody(req);
       if (!isNonEmptyString(body.password)) {
         sendJson(res, 400, { error: "password is required" });
@@ -99,13 +100,13 @@ function createApiHandler({ authService, repositories, vrchatService }) {
       return true;
     }
 
-    if (method === "POST" && pathname === "/admin/logout") {
+    if (method === "POST" && matchesAnyPath("/api/admin/logout", "/admin/logout")) {
       authService.logoutAdmin(res, authState.admin.sid);
       sendJson(res, 200, { ok: true });
       return true;
     }
 
-    if (method === "GET" && pathname === "/admin/me") {
+    if (method === "GET" && matchesAnyPath("/api/admin/me", "/admin/me")) {
       sendJson(res, 200, {
         authenticated: !!authState.admin.authenticated,
         role: authState.admin.authenticated ? "admin" : ""
@@ -113,7 +114,7 @@ function createApiHandler({ authService, repositories, vrchatService }) {
       return true;
     }
 
-    if (method === "POST" && pathname === "/auth/vrc/login/start") {
+    if (method === "POST" && matchesAnyPath("/api/auth/vrc/login/start", "/auth/vrc/login/start")) {
       const body = await parseJsonBody(req);
       const result = await vrchatService.startLoginWithPassword({
         username: body.username,
@@ -141,7 +142,7 @@ function createApiHandler({ authService, repositories, vrchatService }) {
       return true;
     }
 
-    if (method === "POST" && pathname === "/auth/vrc/login/verify") {
+    if (method === "POST" && matchesAnyPath("/api/auth/vrc/login/verify", "/auth/vrc/login/verify")) {
       const body = await parseJsonBody(req);
       const result = await vrchatService.completeLoginWithFactor({
         flowId: body.flowId,
@@ -170,13 +171,13 @@ function createApiHandler({ authService, repositories, vrchatService }) {
       return true;
     }
 
-    if (method === "POST" && pathname === "/auth/vrc/logout") {
+    if (method === "POST" && matchesAnyPath("/api/auth/vrc/logout", "/auth/vrc/logout")) {
       authService.logoutUser(res, authState.user.sid);
       sendJson(res, 200, { ok: true });
       return true;
     }
 
-    if (method === "GET" && pathname === "/auth/vrc/me") {
+    if (method === "GET" && matchesAnyPath("/api/auth/vrc/me", "/auth/vrc/me")) {
       sendJson(res, 200, {
         authenticated: !!authState.user.authenticated,
         role: authState.user.authenticated ? "user" : "",

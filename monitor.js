@@ -2,12 +2,18 @@ const http = require("http");
 const { createAuthService } = require("./src/server/auth");
 const { createApiHandler, sendJson } = require("./src/server/api");
 const { createDb } = require("./src/server/db");
-const { getAdminPasswordFromConfigFile, DB_PATH, LOGIN_PORT, isNonEmptyString } = require("./src/server/config");
+const {
+  getAdminPasswordFromConfigFile,
+  getLoginPortFromConfigFile,
+  DB_PATH,
+  isNonEmptyString
+} = require("./src/server/config");
 const { createRepositories } = require("./src/server/repositories");
 const { serveStatic } = require("./src/server/static");
 const { createVrchatService } = require("./src/server/vrchat");
 
 async function main() {
+  const loginPort = getLoginPortFromConfigFile();
   const adminPassword = getAdminPasswordFromConfigFile();
   if (!isNonEmptyString(adminPassword)) {
     throw new Error("缺少管理员密码：请在 /data/config.tmol 或 /data/config.toml 中配置 ADMIN_PASSWORD");
@@ -27,10 +33,10 @@ async function main() {
   }
 
   const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url || "/", `http://${req.headers.host || `127.0.0.1:${LOGIN_PORT}`}`);
+    const url = new URL(req.url || "/", `http://${req.headers.host || `127.0.0.1:${loginPort}`}`);
     
     // CORS 配置：允许携带 cookie
-    const origin = req.headers.origin || `http://127.0.0.1:${LOGIN_PORT}`;
+    const origin = req.headers.origin || `http://127.0.0.1:${loginPort}`;
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -68,8 +74,8 @@ async function main() {
     console.error("HTTP 服务启动失败:", error?.message || error);
   });
 
-  server.listen(LOGIN_PORT, "0.0.0.0", () => {
-    console.log(`Dashboard 已启动: http://127.0.0.1:${LOGIN_PORT}`);
+  server.listen(loginPort, "0.0.0.0", () => {
+    console.log(`Dashboard 已启动: http://127.0.0.1:${loginPort}`);
     console.log(`SQLite: ${DB_PATH}`);
   });
 }

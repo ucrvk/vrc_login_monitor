@@ -36,8 +36,8 @@ export const useAuthStore = defineStore("auth", {
       let role = "";
       try {
         const [adminMe, userMe] = await Promise.all([
-          apiFetch("/admin/me").catch(() => ({ authenticated: false })),
-          apiFetch("/auth/vrc/me").catch(() => ({ authenticated: false }))
+          apiFetch("/api/admin/me").catch(() => ({ authenticated: false })),
+          apiFetch("/api/auth/vrc/me").catch(() => ({ authenticated: false }))
         ]);
 
         this.adminAuthenticated = !!adminMe.authenticated;
@@ -63,14 +63,14 @@ export const useAuthStore = defineStore("auth", {
       return this.authenticated;
     },
     async adminLogin(password) {
-      await apiFetch("/admin/login", {
+      await apiFetch("/api/admin/login", {
         method: "POST",
         body: { password }
       });
       await this.check();
     },
     async startVrcLogin(username, password) {
-      const res = await apiFetch("/auth/vrc/login/start", {
+      const res = await apiFetch("/api/auth/vrc/login/start", {
         method: "POST",
         body: { username, password }
       });
@@ -80,7 +80,7 @@ export const useAuthStore = defineStore("auth", {
       return res;
     },
     async verifyVrcLogin(flowId, method, code) {
-      const res = await apiFetch("/auth/vrc/login/verify", {
+      const res = await apiFetch("/api/auth/vrc/login/verify", {
         method: "POST",
         body: { flowId, method, code }
       });
@@ -90,17 +90,17 @@ export const useAuthStore = defineStore("auth", {
       return res;
     },
     async logoutAdmin() {
-      await apiFetch("/admin/logout", { method: "POST" });
+      await apiFetch("/api/admin/logout", { method: "POST" });
       await this.check();
     },
     async logoutUser() {
-      await apiFetch("/auth/vrc/logout", { method: "POST" });
+      await apiFetch("/api/auth/vrc/logout", { method: "POST" });
       await this.check();
     },
     async logoutAll() {
       await Promise.all([
-        apiFetch("/admin/logout", { method: "POST" }).catch(() => null),
-        apiFetch("/auth/vrc/logout", { method: "POST" }).catch(() => null)
+        apiFetch("/api/admin/logout", { method: "POST" }).catch(() => null),
+        apiFetch("/api/auth/vrc/logout", { method: "POST" }).catch(() => null)
       ]);
       this.adminAuthenticated = false;
       this.userAuthenticated = false;

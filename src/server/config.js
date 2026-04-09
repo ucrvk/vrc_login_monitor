@@ -1,7 +1,6 @@
 const fs = require("fs");
 const path = require("path");
 
-const LOGIN_PORT = 3688;
 const DB_PATH = path.resolve(process.cwd(), process.env.DB_PATH || "data/app.db");
 const CONFIG_PATH = path.resolve(process.cwd(), "config.json");
 const WEB_DIST_DIR = path.resolve(process.cwd(), "web", "dist");
@@ -9,8 +8,8 @@ const SESSION_COOKIE_NAME = "lm_sid";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 const APP_INFO = {
   name: "login-monitor",
-  version: "3.0.0",
-  contact: "https://vrchat.community/javascript"
+  version: "2.0.0",
+  contact: "wenwen12306@gmail.com"
 };
 const SUPPORTED_EVENT_TYPES = [
   "friend-online",
@@ -87,6 +86,17 @@ function getAdminPasswordFromConfigFile() {
   return getConfigValueFromConfigFile(["ADMIN_PASSWORD", "admin_password", "adminPassword"]);
 }
 
+function getLoginPortFromConfigFile() {
+  const raw = getConfigValueFromConfigFile(["PORT", "port", "LOGIN_PORT", "login_port"]);
+  if (isNonEmptyString(raw)) {
+    const n = Number(raw);
+    if (Number.isInteger(n) && n > 0 && n <= 65535) {
+      return n;
+    }
+  }
+  return 3688;
+}
+
 function getEnvToken() {
   const candidates = [process.env.VRC_TOKEN, process.env.VRCHAT_TOKEN, process.env.TOKEN];
   for (const token of candidates) {
@@ -101,13 +111,13 @@ module.exports = {
   APP_INFO,
   CONFIG_PATH,
   DB_PATH,
-  LOGIN_PORT,
   SESSION_COOKIE_NAME,
   SESSION_TTL_MS,
   SUPPORTED_EVENT_TYPES,
   WEB_DIST_DIR,
   ensureDirForFile,
   getAdminPasswordFromConfigFile,
+  getLoginPortFromConfigFile,
   getEnvToken,
   isNonEmptyString,
   nowMs
