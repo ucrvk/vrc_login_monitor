@@ -14,6 +14,13 @@ function tableHasColumn(db, tableName, columnName) {
   return rows.some((row) => row.name === columnName);
 }
 
+function tableSql(db, tableName) {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name = ?")
+    .get(tableName);
+  return row && typeof row.sql === "string" ? row.sql : "";
+}
+
 function readJsonSafe(filePath) {
   if (!fs.existsSync(filePath)) {
     return null;
@@ -52,6 +59,7 @@ function createDb(dbPath) {
   normalizeLegacyTableNames(db);
   initSchema(db);
   migrateFromLegacyTables(db);
+  ensureUserChannelsAllowMultipleRows(db);
   seedFromLegacyConfigIfNeeded(db);
   ensureDestUserVisibilityMappings(db);
   return db;
@@ -108,8 +116,7 @@ function initSchema(db) {
       options_json TEXT NOT NULL DEFAULT '{}',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
-      FOREIGN KEY (login_user_id) REFERENCES login_users(id) ON DELETE CASCADE,
-      UNIQUE(login_user_id, method)
+      FOREIGN KEY (login_user_id) REFERENCES login_users(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS login_user_dest_users (
@@ -146,6 +153,53 @@ function initSchema(db) {
       WHERE (dest_usrid IS NULL OR dest_usrid = '')
         AND dest_user_id IS NOT NULL
     `);
+  }
+}
+
+function ensureUserChannelsAllowMultipleRows(db) {
+  if (!tableExists(db, "user_channels")) {
+    return;
+  }
+  const sql = tableSql(db, "user_channels");
+  const hasLegacyUnique = /UNIQUE\s*\(\s*login_user_id\s*,\s*method\s*\)/i.test(sql);
+  if (!hasLegacyUnique) {
+    return;
+  }
+
+  if (tableExists(db, "__user_channels_old_multi__")) {
+    db.exec("DROP TABLE __user_channels_old_multi__");
+  }
+
+  db.exec("BEGIN");
+  try {
+    db.exec("ALTER TABLE user_channels RENAME TO __user_channels_old_multi__");
+    db.exec(`
+      CREATE TABLE user_channels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        login_user_id INTEGER NOT NULL,
+        method TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        options_json TEXT NOT NULL DEFAULT '{}',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (login_user_id) REFERENCES login_users(id) ON DELETE CASCADE
+      );
+    `);
+    db.exec(`
+      INSERT INTO user_channels (id, login_user_id, method, enabled, options_json, created_at, updated_at)
+      SELECT id, login_user_id, method, enabled, options_json, created_at, updated_at
+      FROM __user_channels_old_multi__
+      ORDER BY id ASC
+    `);
+    db.exec("DROP TABLE __user_channels_old_multi__");
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_channels_login_user_enabled
+      ON user_channels(login_user_id, enabled)
+    `);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
   }
 }
 

@@ -161,7 +161,7 @@ function createVrchatService(repositories) {
   };
 
   function listNotifyMethods() {
-    return ["serverchanV3"];
+    return ["serverchanV2", "serverchanV3"];
   }
 
   function cleanupLoginFlows() {
@@ -247,15 +247,31 @@ function createVrchatService(repositories) {
     };
   }
 
+  function getEnabledDispatchChannels(loginUserId) {
+    return repositories
+      .getChannelsByLoginUserId(loginUserId)
+      .filter((row) => !!row.enabled)
+      .map((row) => ({
+        loginUserId,
+        method: row.method,
+        options: row.options || {}
+      }));
+  }
+
   async function dispatchChannels(channels, payload) {
-    for (const channel of channels) {
-      try {
-        const send = getNotifySender(channel.method);
-        await send(payload, channel.options || {});
-      } catch (error) {
-        console.error(`通知失败(loginUser=${channel.loginUserId}, method=${channel.method}):`, error?.message || error);
-      }
-    }
+    await Promise.all(
+      channels.map(async (channel) => {
+        try {
+          const send = getNotifySender(channel.method);
+          await send(payload, channel.options || {});
+        } catch (error) {
+          console.error(
+            `通知失败(loginUser=${channel.loginUserId}, method=${channel.method}):`,
+            error?.message || error
+          );
+        }
+      })
+    );
   }
 
   async function handleEventForLoginUser(loginUserId, eventType, content) {
@@ -271,13 +287,7 @@ function createVrchatService(repositories) {
     }
 
     if (eventType === "friend-add" || eventType === "friend-delete") {
-      const channels = repositories.getChannelsByLoginUserId(loginUserId).map((row) => ({
-        loginUserId,
-        method: "serverchanV3",
-        options: {
-          sendkey: row.token
-        }
-      }));
+      const channels = getEnabledDispatchChannels(loginUserId);
       if (!channels.length) {
         return;
       }
@@ -302,13 +312,7 @@ function createVrchatService(repositories) {
       return;
     }
 
-    const channels = repositories.getChannelsByLoginUserId(loginUserId).map((row) => ({
-      loginUserId,
-      method: "serverchanV3",
-      options: {
-        sendkey: row.token
-      }
-    }));
+    const channels = getEnabledDispatchChannels(loginUserId);
 
     if (!channels.length) {
       return;
@@ -686,14 +690,21 @@ function createVrchatService(repositories) {
     }
   }
 
-  async function sendNotifyTestByToken(tokenInput) {
-    const token = isNonEmptyString(tokenInput) ? tokenInput.trim() : "";
-    if (!token) {
-      return { ok: false, error: "通知 token 为空" };
+  async function sendNotifyTest(channelInput, titleInput) {
+    const method = isNonEmptyString(channelInput?.method) ? channelInput.method.trim() : "";
+    const options = channelInput && typeof channelInput.options === "object" ? channelInput.options : {};
+    if (method !== "serverchanV2" && method !== "serverchanV3") {
+      return { ok: false, error: "不支持的通知渠道" };
+    }
+    if (method === "serverchanV2" && !isNonEmptyString(options.sckey)) {
+      return { ok: false, error: "serverchanV2 缺少 sckey" };
+    }
+    if (method === "serverchanV3" && !isNonEmptyString(options.sendkey)) {
+      return { ok: false, error: "serverchanV3 缺少 sendkey" };
     }
 
     try {
-      const send = getNotifySender("serverchanV3");
+      const send = getNotifySender(method);
       await send(
         {
           type: "notify-test",
@@ -705,8 +716,8 @@ function createVrchatService(repositories) {
           timestamp: Date.now()
         },
         {
-          sendkey: token,
-          title: "VRChat Monitor 测试通知"
+          ...options,
+          title: isNonEmptyString(titleInput) ? titleInput.trim() : "VRChat Monitor 测试通知"
         }
       );
       return { ok: true };
@@ -734,7 +745,7 @@ function createVrchatService(repositories) {
     getStatus,
     listNotifyMethods,
     reconcileConnections,
-    sendNotifyTestByToken,
+    sendNotifyTest,
     startLoginWithPassword,
     startMonitoringIfPossible
   };

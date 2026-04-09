@@ -117,22 +117,43 @@
             </el-tab-pane>
 
             <el-tab-pane label="通知渠道">
-              <el-form label-width="120px">
-                <el-form-item label="通知 Token">
-                  <div class="notify-row">
+              <div class="table-actions">
+                <el-button size="small" @click="addChannel">新增渠道</el-button>
+              </div>
+              <el-table :data="notifyChannels" border>
+                <el-table-column label="方式" width="180">
+                  <template #default="{ row }">
+                    <el-select v-model="row.method" style="width: 100%" @change="onChannelMethodChange(row)">
+                      <el-option label="serverchanV2" value="serverchanV2" />
+                      <el-option label="serverchanV3" value="serverchanV3" />
+                    </el-select>
+                  </template>
+                </el-table-column>
+                <el-table-column label="Token">
+                  <template #default="{ row }">
                     <el-input
-                      v-model="notifyToken"
-                      placeholder="请输入通知 token（仅支持 serverchanV3）"
+                      :model-value="getChannelToken(row)"
+                      @update:model-value="setChannelToken(row, $event)"
+                      :placeholder="row.method === 'serverchanV2' ? '请输入 sckey' : '请输入 sendkey'"
                     />
-                    <el-button plain @click="testNotify" :loading="testingNotify">测试</el-button>
-                  </div>
-                </el-form-item>
-                <el-form-item>
-                  <div>
-                    <el-button type="primary" @click="saveNotify" :loading="savingNotify">保存通知 token</el-button>
-                  </div>
-                </el-form-item>
-              </el-form>
+                  </template>
+                </el-table-column>
+                <el-table-column label="启用" width="90">
+                  <template #default="{ row }">
+                    <el-switch v-model="row.enabled" />
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="170">
+                  <template #default="{ row, $index }">
+                    <el-button text @click="testNotify(row)" :loading="!!row.testing">测试</el-button>
+                    <el-button text type="danger" @click="notifyChannels.splice($index, 1)">删除</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <div class="table-actions">
+                <el-button type="primary" @click="saveNotify" :loading="savingNotify">保存渠道配置</el-button>
+                <el-button plain @click="tokenGuideVisible = true">获取 Token</el-button>
+              </div>
             </el-tab-pane>
 
             <el-tab-pane label="Token">
@@ -200,6 +221,30 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="tokenGuideVisible" title="获取 ServerChan Token" width="560px">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="请在对应网站登录后创建/查看 Token，然后回到本页面填写。"
+      />
+      <div style="margin-top: 14px">
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="serverchanV2">
+            <el-link href="https://sct.ftqq.com/" target="_blank" type="primary">https://sct.ftqq.com/</el-link>
+            <div style="margin-top: 6px; color: #666">用于获取 `sckey`</div>
+          </el-descriptions-item>
+          <el-descriptions-item label="serverchanV3">
+            <el-link href="https://sc3.ft07.com/" target="_blank" type="primary">https://sc3.ft07.com/</el-link>
+            <div style="margin-top: 6px; color: #666">用于获取 `sendkey`</div>
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+      <template #footer>
+        <el-button @click="tokenGuideVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -217,7 +262,6 @@ const loading = ref(false);
 const loadingDestUsers = ref(false);
 const savingSubscriptions = ref(false);
 const savingNotify = ref(false);
-const testingNotify = ref(false);
 
 const users = ref([]);
 const selectedUserId = ref(null);
@@ -234,7 +278,7 @@ const systemStatus = ref({
 });
 
 const subscriptions = ref([]);
-const notifyToken = ref("");
+const notifyChannels = ref([]);
 const tokenInput = ref("");
 const loginState = ref({
   isTokenValid: false,
@@ -253,6 +297,7 @@ const loginDialog = reactive({
   factorMethod: "",
   factorCode: ""
 });
+const tokenGuideVisible = ref(false);
 
 const selectedUser = computed(() => users.value.find((u) => u.id === selectedUserId.value) || null);
 
@@ -267,7 +312,7 @@ function patchEditorBySelectedUser() {
   const user = selectedUser.value;
   if (!user) {
     subscriptions.value = [];
-    notifyToken.value = "";
+    notifyChannels.value = [];
     tokenInput.value = "";
     loginState.value = {
       isTokenValid: false,
@@ -283,7 +328,13 @@ function patchEditorBySelectedUser() {
     enabled: !!s.enabled
   }));
 
-  notifyToken.value = (user.channels && user.channels[0] && user.channels[0].token) || "";
+  notifyChannels.value = (user.channels || []).map((c) => ({
+    id: c.id,
+    method: c.method === "serverchanV2" ? "serverchanV2" : "serverchanV3",
+    enabled: c.enabled !== false,
+    options: c.options && typeof c.options === "object" ? { ...c.options } : {},
+    testing: false
+  }));
 
   tokenInput.value = user.loginState?.token || "";
   loginState.value = {
@@ -400,30 +451,56 @@ async function saveNotify() {
 
   savingNotify.value = true;
   try {
+    const channels = notifyChannels.value.map((row) => {
+      const method = row.method === "serverchanV2" ? "serverchanV2" : "serverchanV3";
+      const token = getChannelToken(row);
+      if (!token) {
+        throw new Error(`${method} 的 token 不能为空`);
+      }
+      return {
+        method,
+        enabled: row.enabled !== false,
+        options: method === "serverchanV2" ? { sckey: token } : { sendkey: token }
+      };
+    });
     await apiFetch(`/api/users/${selectedUserId.value}/channels`, {
       method: "POST",
-      body: { token: notifyToken.value }
+      body: { channels }
     });
-    ElMessage.success("通知 token 已保存");
+    ElMessage.success("通知渠道已保存");
     await reloadAll();
   } catch (error) {
-    ElMessage.error(error.message || "保存通知 token 失败");
+    ElMessage.error(error.message || "保存通知渠道失败");
   } finally {
     savingNotify.value = false;
   }
 }
 
-async function testNotify() {
+async function testNotify(row) {
   if (!selectedUserId.value) {
     ElMessage.warning("当前没有可用 loginUser，请先完成 VRC 登录");
     return;
   }
+  if (!row) {
+    ElMessage.warning("请先选择要测试的渠道");
+    return;
+  }
 
-  testingNotify.value = true;
+  row.testing = true;
   try {
+    const method = row.method === "serverchanV2" ? "serverchanV2" : "serverchanV3";
+    const token = getChannelToken(row);
+    if (!token) {
+      throw new Error(`${method} 的 token 不能为空`);
+    }
     const res = await apiFetch(`/api/users/${selectedUserId.value}/channels/test`, {
       method: "POST",
-      body: { token: notifyToken.value }
+      body: {
+        channel: {
+          method,
+          options: method === "serverchanV2" ? { sckey: token } : { sendkey: token }
+        }
+      }
     });
     if (res.ok) {
       ElMessage.success("测试通知发送成功");
@@ -433,7 +510,49 @@ async function testNotify() {
   } catch (error) {
     ElMessage.error(error.message || "测试通知发送失败");
   } finally {
-    testingNotify.value = false;
+    row.testing = false;
+  }
+}
+
+function addChannel() {
+  notifyChannels.value.push({
+    method: "serverchanV3",
+    enabled: true,
+    options: { sendkey: "" },
+    testing: false
+  });
+}
+
+function onChannelMethodChange(row) {
+  if (!row) {
+    return;
+  }
+  if (row.method === "serverchanV2") {
+    row.options = { sckey: "" };
+  } else {
+    row.options = { sendkey: "" };
+  }
+}
+
+function getChannelToken(row) {
+  if (!row || !row.options || typeof row.options !== "object") {
+    return "";
+  }
+  if (row.method === "serverchanV2") {
+    return typeof row.options.sckey === "string" ? row.options.sckey : "";
+  }
+  return typeof row.options.sendkey === "string" ? row.options.sendkey : "";
+}
+
+function setChannelToken(row, value) {
+  if (!row) {
+    return;
+  }
+  const normalized = typeof value === "string" ? value : "";
+  if (row.method === "serverchanV2") {
+    row.options = { sckey: normalized };
+  } else {
+    row.options = { sendkey: normalized };
   }
 }
 

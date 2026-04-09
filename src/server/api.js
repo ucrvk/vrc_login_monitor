@@ -194,7 +194,7 @@ function createApiHandler({ authService, repositories, vrchatService }) {
       }
       sendJson(res, 200, {
         eventTypes: SUPPORTED_EVENT_TYPES,
-        notifyMethods: ["serverchanV3"]
+        notifyMethods: ["serverchanV2", "serverchanV3"]
       });
       return true;
     }
@@ -302,10 +302,21 @@ function createApiHandler({ authService, repositories, vrchatService }) {
         return true;
       }
       const body = await parseJsonBody(req);
-      repositories.setNotifyToken(loginUserId, body.token || "");
+      if (!Array.isArray(body.channels)) {
+        sendJson(res, 400, { error: "channels 必须是数组" });
+        return true;
+      }
+      try {
+        repositories.replaceChannels(loginUserId, body.channels);
+      } catch (error) {
+        sendJson(res, 400, { error: error?.message || "通知渠道保存失败" });
+        return true;
+      }
       const channels = repositories.getChannelsByLoginUserId(loginUserId).map((row) => ({
         id: row.id,
-        token: row.token || "",
+        method: row.method,
+        enabled: !!row.enabled,
+        options: row.options || {},
         createdAt: row.created_at,
         updatedAt: row.updated_at
       }));
@@ -328,11 +339,12 @@ function createApiHandler({ authService, repositories, vrchatService }) {
         return true;
       }
       const body = await parseJsonBody(req);
-      const stored = repositories.getChannelsByLoginUserId(loginUserId);
-      const token = isNonEmptyString(body.token)
-        ? body.token.trim()
-        : (stored[0] && stored[0].token) || "";
-      const result = await vrchatService.sendNotifyTestByToken(token);
+      const channel = body.channel;
+      if (!channel || typeof channel !== "object") {
+        sendJson(res, 400, { error: "channel 参数缺失" });
+        return true;
+      }
+      const result = await vrchatService.sendNotifyTest(channel, body.title);
       if (!result.ok) {
         sendJson(res, 400, result);
         return true;

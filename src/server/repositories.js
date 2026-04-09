@@ -21,17 +21,31 @@ function serializeOptions(options) {
 }
 
 function createRepositories(db) {
-  function extractNotifyTokenFromOptions(options) {
-    if (!options || typeof options !== "object") {
-      return "";
-    }
-    const candidates = [options.token, options.sendkey, options.sckey];
-    for (const item of candidates) {
-      if (isNonEmptyString(item)) {
-        return item.trim();
-      }
+  function normalizeChannelMethod(input) {
+    const method = isNonEmptyString(input) ? input.trim() : "";
+    if (method === "serverchanV2" || method === "serverchanV3") {
+      return method;
     }
     return "";
+  }
+
+  function normalizeChannelOptions(method, inputOptions) {
+    const options = inputOptions && typeof inputOptions === "object" ? inputOptions : {};
+    if (method === "serverchanV2") {
+      const sckey = isNonEmptyString(options.sckey) ? options.sckey.trim() : "";
+      if (!sckey) {
+        throw new Error("serverchanV2 缺少 sckey");
+      }
+      return { sckey };
+    }
+    if (method === "serverchanV3") {
+      const sendkey = isNonEmptyString(options.sendkey) ? options.sendkey.trim() : "";
+      if (!sendkey) {
+        throw new Error("serverchanV3 缺少 sendkey");
+      }
+      return { sendkey };
+    }
+    throw new Error(`不支持的通知渠道: ${method || "unknown"}`);
   }
   function listLoginUsers() {
     return db
@@ -283,7 +297,7 @@ function createRepositories(db) {
   }
 
   function getChannelsByLoginUserId(loginUserId) {
-    const rows = db
+    return db
       .prepare(
         `SELECT id, method, enabled, options_json, created_at, updated_at
          FROM user_channels
@@ -293,44 +307,43 @@ function createRepositories(db) {
       .all(loginUserId)
       .map((row) => ({
         ...row,
+        method: normalizeChannelMethod(row.method),
+        enabled: Number(row.enabled) === 1,
         options: deserializeOptions(row.options_json)
       }));
-
-    const firstEnabled = rows.find((r) => !!r.enabled);
-    const token = firstEnabled ? extractNotifyTokenFromOptions(firstEnabled.options) : "";
-
-    if (!token) {
-      return [];
-    }
-
-    return [
-      {
-        id: firstEnabled.id,
-        method: "serverchanV3",
-        enabled: true,
-        options: {
-          sendkey: token
-        },
-        token,
-        created_at: firstEnabled.created_at,
-        updated_at: firstEnabled.updated_at
-      }
-    ];
   }
 
-  function setNotifyToken(loginUserId, tokenInput) {
+  function replaceChannels(loginUserId, channels) {
+    if (!Array.isArray(channels)) {
+      throw new Error("channels 必须是数组");
+    }
     const now = nowMs();
-    const token = isNonEmptyString(tokenInput) ? tokenInput.trim() : "";
     db.exec("BEGIN");
     try {
       db.prepare("DELETE FROM user_channels WHERE login_user_id = ?").run(loginUserId);
+      const insert = db.prepare(
+        `INSERT INTO user_channels
+         (login_user_id, method, enabled, options_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      );
 
-      if (token) {
-        db.prepare(
-          `INSERT INTO user_channels
-           (login_user_id, method, enabled, options_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        ).run(loginUserId, "serverchanV3", 1, serializeOptions({ sendkey: token }), now, now);
+      for (const channel of channels) {
+        if (!channel || typeof channel !== "object") {
+          continue;
+        }
+        const method = normalizeChannelMethod(channel.method);
+        if (!method) {
+          throw new Error(`不支持的通知渠道: ${channel.method || "unknown"}`);
+        }
+        const options = normalizeChannelOptions(method, channel.options);
+        insert.run(
+          loginUserId,
+          method,
+          channel.enabled === false ? 0 : 1,
+          serializeOptions(options),
+          now,
+          now
+        );
       }
 
       db.exec("COMMIT");
@@ -359,7 +372,9 @@ function createRepositories(db) {
       })),
       channels: getChannelsByLoginUserId(u.id).map((c) => ({
         id: c.id,
-        token: c.token || "",
+        method: c.method,
+        enabled: !!c.enabled,
+        options: c.options || {},
         createdAt: c.created_at,
         updatedAt: c.updated_at
       })),
@@ -411,25 +426,33 @@ function createRepositories(db) {
     const placeholders = loginUserIds.map(() => "?").join(",");
     const rows = db
       .prepare(
-        `SELECT login_user_id, method, options_json
+        `SELECT login_user_id, method, enabled, options_json
          FROM user_channels
          WHERE enabled = 1 AND login_user_id IN (${placeholders})`
       )
       .all(...loginUserIds)
       .map((row) => {
+        const method = normalizeChannelMethod(row.method);
+        if (!method) {
+          return null;
+        }
         const options = deserializeOptions(row.options_json);
-        return {
-          loginUserId: row.login_user_id,
-          token: extractNotifyTokenFromOptions(options)
-        };
+        try {
+          return {
+            loginUserId: row.login_user_id,
+            method,
+            enabled: Number(row.enabled) === 1,
+            options: normalizeChannelOptions(method, options)
+          };
+        } catch (_error) {
+          return null;
+        }
       })
-      .filter((row) => !!row.token)
+      .filter((row) => row && row.enabled)
       .map((row) => ({
         loginUserId: row.loginUserId,
-        method: "serverchanV3",
-        options: {
-          sendkey: row.token
-        }
+        method: row.method,
+        options: row.options
       }));
   }
 
@@ -457,7 +480,7 @@ function createRepositories(db) {
     removeDestUserFromLoginUser,
     isDestUserVisibleToLoginUser,
     replaceSubscriptions,
-    setNotifyToken,
+    replaceChannels,
     getChannelsByLoginUserId,
     listUsersWithDetails,
     listDestUsers,
