@@ -1,9 +1,11 @@
 const http = require("http");
+const https = require("https");
 const { createAuthService } = require("./src/server/auth");
 const { createApiHandler, sendJson } = require("./src/server/api");
 const { createDb } = require("./src/server/db");
 const {
   getAdminPasswordFromConfigFile,
+  getHttpsCredentialsFromDataDir,
   getLoginPortFromConfigFile,
   DB_PATH,
   isNonEmptyString
@@ -14,6 +16,8 @@ const { createVrchatService } = require("./src/server/vrchat");
 
 async function main() {
   const loginPort = getLoginPortFromConfigFile();
+  const httpsCredentials = getHttpsCredentialsFromDataDir();
+  const protocol = httpsCredentials ? "https" : "http";
   const adminPassword = getAdminPasswordFromConfigFile();
   if (!isNonEmptyString(adminPassword)) {
     throw new Error("缺少管理员密码：请在 /data/config.tmol 或 /data/config.toml 中配置 ADMIN_PASSWORD");
@@ -32,11 +36,11 @@ async function main() {
     console.warn(`监控尚未启动: ${startupResult.reason}`);
   }
 
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url || "/", `http://${req.headers.host || `127.0.0.1:${loginPort}`}`);
+  const requestHandler = async (req, res) => {
+    const url = new URL(req.url || "/", `${protocol}://${req.headers.host || `127.0.0.1:${loginPort}`}`);
     
     // CORS 配置：允许携带 cookie
-    const origin = req.headers.origin || `http://127.0.0.1:${loginPort}`;
+    const origin = req.headers.origin || `${protocol}://127.0.0.1:${loginPort}`;
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -68,14 +72,23 @@ async function main() {
       console.error("请求处理失败:", message);
       sendJson(res, 500, { error: message });
     }
-  });
+  };
+
+  const server = httpsCredentials
+    ? https.createServer({ key: httpsCredentials.key, cert: httpsCredentials.cert }, requestHandler)
+    : http.createServer(requestHandler);
 
   server.on("error", (error) => {
     console.error("HTTP 服务启动失败:", error?.message || error);
   });
 
   server.listen(loginPort, "0.0.0.0", () => {
-    console.log(`Dashboard 已启动: http://127.0.0.1:${loginPort}`);
+    console.log(`Dashboard 已启动: ${protocol}://127.0.0.1:${loginPort}`);
+    if (httpsCredentials) {
+      console.log(`HTTPS 证书: key=${httpsCredentials.keyPath}, cert=${httpsCredentials.certPath}`);
+    } else {
+      console.log("未检测到 SSL 证书，使用 HTTP");
+    }
     console.log(`SQLite: ${DB_PATH}`);
   });
 }

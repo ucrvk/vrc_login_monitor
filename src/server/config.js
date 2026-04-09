@@ -24,6 +24,19 @@ const ADMIN_CONFIG_CANDIDATES = [
   path.resolve(process.cwd(), "data", "config.tmol"),
   path.resolve(process.cwd(), "data", "config.toml")
 ];
+const SSL_CERT_CANDIDATES = [
+  { key: "/data/ssl.key", cert: "/data/ssl.crt" },
+  { key: "/data/server.key", cert: "/data/server.crt" },
+  { key: "/data/key.pem", cert: "/data/cert.pem" },
+  { key: "/data/privkey.pem", cert: "/data/fullchain.pem" },
+  { key: path.resolve(process.cwd(), "data", "ssl.key"), cert: path.resolve(process.cwd(), "data", "ssl.crt") },
+  { key: path.resolve(process.cwd(), "data", "server.key"), cert: path.resolve(process.cwd(), "data", "server.crt") },
+  { key: path.resolve(process.cwd(), "data", "key.pem"), cert: path.resolve(process.cwd(), "data", "cert.pem") },
+  {
+    key: path.resolve(process.cwd(), "data", "privkey.pem"),
+    cert: path.resolve(process.cwd(), "data", "fullchain.pem")
+  }
+];
 
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
@@ -107,6 +120,28 @@ function getEnvToken() {
   return "";
 }
 
+function getHttpsCredentialsFromDataDir() {
+  for (const candidate of SSL_CERT_CANDIDATES) {
+    const keyPath = candidate.key;
+    const certPath = candidate.cert;
+    if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+      continue;
+    }
+    const key = fs.readFileSync(keyPath, "utf8");
+    const cert = fs.readFileSync(certPath, "utf8");
+    if (!isNonEmptyString(key) || !isNonEmptyString(cert)) {
+      continue;
+    }
+    return {
+      key,
+      cert,
+      keyPath,
+      certPath
+    };
+  }
+  return null;
+}
+
 module.exports = {
   APP_INFO,
   CONFIG_PATH,
@@ -117,6 +152,7 @@ module.exports = {
   WEB_DIST_DIR,
   ensureDirForFile,
   getAdminPasswordFromConfigFile,
+  getHttpsCredentialsFromDataDir,
   getLoginPortFromConfigFile,
   getEnvToken,
   isNonEmptyString,
